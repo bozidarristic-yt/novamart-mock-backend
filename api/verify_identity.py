@@ -3,6 +3,9 @@ import json, os, urllib.request, urllib.parse, urllib.error
 
 # --- Supabase connection (service-role key lives only in Vercel env vars) ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+if SUPABASE_URL.endswith("/rest/v1"):
+    SUPABASE_URL = SUPABASE_URL[: -len("/rest/v1")]
+    
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
 
