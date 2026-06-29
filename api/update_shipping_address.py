@@ -6,7 +6,6 @@ import json, os, urllib.request, urllib.parse, urllib.error
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 if SUPABASE_URL.endswith("/rest/v1"):
     SUPABASE_URL = SUPABASE_URL[: -len("/rest/v1")]
-    
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
 
@@ -46,7 +45,7 @@ def process(params):
     qa = urllib.parse.quote(str(acc))
     rows = sb("GET", f"orders?order_id=eq.{qo}&account_number=eq.{qa}&select=order_id,shipping_address")
     if not rows:
-        return 200, {"success": False, "reason": "order_not_found_for_account"}
+        return 404, {"success": False, "reason": "order_not_found_for_account"}
 
     old_address = rows[0].get("shipping_address")
 
