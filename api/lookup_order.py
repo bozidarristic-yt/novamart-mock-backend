@@ -1,16 +1,15 @@
 from http.server import BaseHTTPRequestHandler
 import json, os, urllib.request, urllib.parse, urllib.error
 
-# --- Supabase connection (service-role key lives only in Vercel env vars) ---
+# --- Supabase connection (service key lives only in Vercel env vars) ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 if SUPABASE_URL.endswith("/rest/v1"):
     SUPABASE_URL = SUPABASE_URL[: -len("/rest/v1")]
-    
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
 
 def sb(method, path, body=None):
-    """Call the Supabase REST (PostgREST) API with the service-role key."""
+    """Call the Supabase REST (PostgREST) API with the service key."""
     url = f"{SUPABASE_URL}/rest/v1/{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -28,7 +27,11 @@ def sb(method, path, body=None):
 
 
 def process(params):
-    """lookup_order(order_id) -> order data or {status: not_found}."""
+    """lookup_order(order_id) -> order data, or {status: not_found}.
+
+    Returns HTTP 200 in both cases; the workflow reads the `status` field
+    (assigned to a dynamic variable) to know found vs not_found.
+    """
     order_id = params.get("order_id")
     if not order_id:
         return 400, {"error": "order_id required"}
@@ -38,7 +41,7 @@ def process(params):
     rows = sb("GET", f"orders?order_id=eq.{q}&select={fields}")
 
     if not rows:
-        return 200, {"status": "not_found", "order_id": order_id}
+        return 200, {"status": "not_found", "order_id": str(order_id)}
     return 200, rows[0]
 
 
