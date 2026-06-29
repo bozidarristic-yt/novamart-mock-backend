@@ -1,16 +1,17 @@
 from http.server import BaseHTTPRequestHandler
 import json, os, urllib.request, urllib.parse, urllib.error
 
-# --- Supabase connection (service-role key lives only in Vercel env vars) ---
+# --- Supabase connection (service key lives only in Vercel env vars) ---
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 if SUPABASE_URL.endswith("/rest/v1"):
     SUPABASE_URL = SUPABASE_URL[: -len("/rest/v1")]
-    
 SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+MAX_ATTEMPTS = 3
 
 
 def sb(method, path, body=None):
-    """Call the Supabase REST (PostgREST) API with the service-role key."""
+    """Call the Supabase REST (PostgREST) API with the service key."""
     url = f"{SUPABASE_URL}/rest/v1/{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -28,27 +29,42 @@ def sb(method, path, body=None):
 
 
 def process(params):
-    """verify_identity(account_number, postcode) -> {success, customer_name?}.
+    """verify_identity(account_number, postcode, attempts?) -> {success, ...}.
 
-    Returns HTTP 200 in BOTH cases so the workflow can branch on the
-    semantic result (success true/false), not on an HTTP error code.
+    Stateless. The running failed-attempt count is carried in a per-conversation
+    dynamic variable ({{verify_attempts}}), passed in as `attempts`. On a failed
+    match the tool returns that count + 1 and a `locked` flag (>= MAX_ATTEMPTS);
+    the workflow writes `attempts` back to the variable. Always HTTP 200 so the
+    workflow branches on the semantic `success` field.
     """
     acc = params.get("account_number")
     pc = params.get("postcode")
+
+    # current count carried in from {{verify_attempts}} (empty on the first call)
+    try:
+        prior = int(params.get("attempts") or 0)
+    except (ValueError, TypeError):
+        prior = 0
+
+    # Missing input is not counted as a real attempt.
     if not acc or not pc:
-        return 200, {"success": False}
+        return 200, {"success": False, "attempts": prior, "locked": prior >= MAX_ATTEMPTS}
 
     q = urllib.parse.quote(str(acc))
     rows = sb("GET", f"identities?account_number=eq.{q}&select=account_number,postcode,customer_name")
+    ok = bool(rows) and str(rows[0]["postcode"]) == str(pc)
 
-    if not rows or str(rows[0]["postcode"]) != str(pc):
-        return 200, {"success": False}
+    if ok:
+        return 200, {
+            "success": True,
+            "customer_name": rows[0]["customer_name"],
+            "account_number": str(acc),
+            "attempts": prior,
+            "locked": False,
+        }
 
-    return 200, {
-        "success": True,
-        "customer_name": rows[0]["customer_name"],
-        "account_number": str(acc),
-    }
+    new = prior + 1
+    return 200, {"success": False, "attempts": new, "locked": new >= MAX_ATTEMPTS}
 
 
 class handler(BaseHTTPRequestHandler):
